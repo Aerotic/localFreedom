@@ -88,15 +88,10 @@ class RocketCustomCSRs(implicit p: Parameters) extends CustomCSRs with HasRocket
   override def decls = super.decls :+ marchid :+ mvendorid :+ mimpid
 }
 
-
-
-
 @chiselName
 class Rocket(implicit p: Parameters) extends CoreModule()(p)
     with HasRocketCoreParameters
     with HasCoreIO {
-
-  val mBram = Module(new Blackbox_BlkDualBram())
 
   val clock_en_reg = RegInit(true.B)
   val long_latency_stall = Reg(Bool())
@@ -347,7 +342,7 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
   alu.io.in2 := ex_op2.asUInt
   alu.io.in1 := ex_op1.asUInt
   //plus one module ==========================================
-  val test_add_out =Reg(UInt(width=xLen))
+  // val test_add_out =Reg(UInt(width=xLen))
   
   // val addu =Module(new ADDU)
   // addu.io.fn :=ex_ctrl.alu_fn
@@ -482,6 +477,11 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
     mem_reg_sfence := false
   }.elsewhen (ex_pc_valid) {
     mem_ctrl := ex_ctrl
+    // 加上一条地址信号
+    mem_ctrl.rocc_addr := encodeVirtualAddress(ex_rs(0), alu.io.adder_out)
+    when(ex_ctrl.mem && isRead(ex_ctrl.mem_cmd)){
+      // printf("mem_addr %x\n",alu.io.adder_out)
+    }
     mem_reg_rvc := ex_reg_rvc
     mem_reg_load := ex_ctrl.mem && isRead(ex_ctrl.mem_cmd)
     mem_reg_store := ex_ctrl.mem && isWrite(ex_ctrl.mem_cmd)
@@ -606,7 +606,7 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
     ll_waddr := dmem_resp_waddr
     ll_wen := Bool(true)
   }
-
+  //从DCache返回过来的信号线
   val wb_valid = wb_reg_valid && !replay_wb && !wb_xcpt
   val wb_wen = wb_valid && wb_ctrl.wxd
   val rf_wen = wb_wen || ll_wen
@@ -616,7 +616,12 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
                  Mux(wb_ctrl.csr =/= CSR.N, csr.io.rw.rdata,
                  Mux(wb_ctrl.mul, mul.map(_.io.resp.bits.data).getOrElse(wb_reg_wdata),
                  wb_reg_wdata))))
-  when (rf_wen) { rf.write(rf_waddr, rf_wdata) }
+  when (rf_wen) { 
+    when(dmem_resp_valid && dmem_resp_xpu){
+      // printf ("x%d p%d 0x%x addr %x inst %x\n", rf_waddr, rf_waddr, rf_wdata , wb_ctrl.rocc_addr ,wb_reg_inst)
+    }
+    rf.write(rf_waddr, rf_wdata) 
+  } //rf register files
 
   // hook up control/status regfile
   csr.io.ungated_clock := clock
@@ -629,7 +634,16 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
   csr.io.hartid := io.hartid
   io.fpu.fcsr_rm := csr.io.fcsr_rm
   csr.io.fcsr_flags := io.fpu.fcsr_flags
-  csr.io.rocc_interrupt := io.rocc.interrupt
+
+  val rocc_int = Module(new ROCC_Int)
+  rocc_int.io.in1 := ex_op1.asUInt
+  rocc_int.io.in2 := ex_op2.asUInt
+  csr.io.rocc_interrupt := rocc_int.io.cmp_out//io.rocc.interrupt
+  when(rocc_int.io.cmp_out){
+    printf("should be interrupt\n");
+  }
+
+
   csr.io.pc := wb_reg_pc
   val tval_valid = wb_xcpt && wb_cause.isOneOf(Causes.illegal_instruction, Causes.breakpoint,
     Causes.misaligned_load, Causes.misaligned_store,
@@ -772,8 +786,8 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
   io.dmem.req.bits.cmd  := ex_ctrl.mem_cmd
   io.dmem.req.bits.typ  := ex_ctrl.mem_type
   io.dmem.req.bits.phys := Bool(false)
-  // io.dmem.req.bits.addr := encodeVirtualAddress(ex_rs(0), addu.io.out)  //alu.io.adder_out
-  
+  io.dmem.req.bits.addr := encodeVirtualAddress(ex_rs(0), alu.io.adder_out)  // addu.io.out alu.io.adder_out
+
  // printf("before data %x  ,after data %x  \n",addu.io.out,encodeVirtualAddress(ex_rs(0), addu.io.out))
   
   io.dmem.s1_data.data := (if (fLen == 0) mem_reg_rs2 else Mux(mem_ctrl.fp, Fill((xLen max fLen) / fLen, io.fpu.store_data), mem_reg_rs2))
@@ -866,13 +880,13 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
     }
   }
   else {
-    printf("C%d: %d [%d] pc=[%x] W[r%d=%x][%d] R[r%d=%x] R[r%d=%x] inst=[%x] DASM(%x)\n",
-         coreMonitorBundle.hartid, coreMonitorBundle.time, coreMonitorBundle.valid,
-         coreMonitorBundle.pc,
-         coreMonitorBundle.wrdst, coreMonitorBundle.wrdata, coreMonitorBundle.wren,
-         coreMonitorBundle.rd0src, coreMonitorBundle.rd0val,
-         coreMonitorBundle.rd1src, coreMonitorBundle.rd1val,
-         coreMonitorBundle.inst, coreMonitorBundle.inst)
+    // printf("C%d: %d [%d] pc=[%x] W[r%d=%x][%d] R[r%d=%x] R[r%d=%x] inst=[%x] DASM(%x)\n",
+        //  coreMonitorBundle.hartid, coreMonitorBundle.time, coreMonitorBundle.valid,
+        //  coreMonitorBundle.pc,
+        //  coreMonitorBundle.wrdst, coreMonitorBundle.wrdata, coreMonitorBundle.wren,
+        //  coreMonitorBundle.rd0src, coreMonitorBundle.rd0val,
+        //  coreMonitorBundle.rd1src, coreMonitorBundle.rd1val,
+        //  coreMonitorBundle.inst, coreMonitorBundle.inst)
   }
 
   PlusArg.timeout(
@@ -921,29 +935,6 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p)
       when (ens) { _r := _next }
     }
   }
-  val blacktest_ena = Reg(UInt(1.W))
-  val blacktest_wea = Reg(UInt(1.W))
-  val blacktest_addra = Reg(UInt(10.W))
-  val blacktest_dina = Reg(UInt(32.W))
-  val blacktest_douta = Reg(UInt(32.W))
-  val blacktest_enb = Reg(UInt(1.W))
-  val blacktest_web = Reg(UInt(1.W))
-  val blacktest_addrb = Reg(UInt(10.W))
-  val blacktest_dinb = Reg(UInt(32.W))
-  val blacktest_doutb = Reg(UInt(32.W))
-  BankedMemory(1,1,32).write(0,blacktest_addra,blacktest_dina)
-  // mBram.io.clka := gated_clock
-  // mBram.io.ena := blacktest_ena
-  // mBram.io.wea := blacktest_wea
-  // mBram.io.addra := blacktest_addra
-  // mBram.io.dina := blacktest_dina
-  // blacktest_douta := mBram.io.douta
-  // mBram.io.clkb := gated_clock
-  // mBram.io.enb := blacktest_enb
-  // mBram.io.web := blacktest_web
-  // mBram.io.addrb := blacktest_addrb
-  // mBram.io.dinb := blacktest_dinb
-  // blacktest_doutb := mBram.io.doutb
 }
 
 class RegFile(n: Int, w: Int, zero: Boolean = false) {
