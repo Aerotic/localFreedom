@@ -12,12 +12,14 @@ import freechips.rocketchip.scie.SCIE
 import Instructions._
 import ALU._
 
+import freechips.rocketchip.tile._
+
 abstract trait DecodeConstants extends HasCoreParameters
 {
   val table: Array[(BitPat, List[BitPat])]
 }
 
-class IntCtrlSigs extends Bundle {
+class IntCtrlSigs (implicit p:Parameters) extends CoreModule()(p) {
   val legal = Bool()
   val fp = Bool()
   val rocc = Bool()
@@ -47,6 +49,8 @@ class IntCtrlSigs extends Bundle {
   val fence = Bool()
   val amo = Bool()
   val dp = Bool()
+
+  val rocc_addr = Bits(width = xLen)
 
   def default: List[BitPat] =
                 //           jal                                                                   renf1             fence.i

@@ -6,7 +6,8 @@ endif
 MODEL ?= TestHarness
 PROJECT ?= freechips.rocketchip.system
 CFG_PROJECT ?= $(PROJECT)
-CONFIG ?= DefaultConfig
+# CONFIG ?= DefaultConfig
+CONFIG = RoccExampleConfig
 # TODO: For now must match rocketchip.Generator
 long_name = $(PROJECT).$(CONFIG)
 
